@@ -19,7 +19,7 @@ import {
 type NavKey = "dashboard" | "create" | "polls" | "settings"
 
 const NAV: { key: NavKey; label: string; href: string; icon: React.ElementType }[] = [
-  { key: "dashboard", label: "Dashboard", href: "/", icon: LayoutDashboard },
+  { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { key: "create", label: "Create Poll", href: "/create", icon: PlusCircle },
   { key: "polls", label: "My Polls", href: "/my-polls", icon: ListChecks },
   { key: "settings", label: "Settings", href: "/settings", icon: Settings },
