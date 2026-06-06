@@ -1,17 +1,42 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
-import { Hexagon, ArrowRight, Loader2, Check, Trophy, Timer } from "lucide-react"
+import { Hexagon, ArrowRight, Loader2, Check, Trophy, Timer, X } from "lucide-react"
 
-type Stage = "join" | "lobby" | "question" | "result"
+type Stage = "join" | "lobby" | "question" | "result" | "ended"
 
-const OPTIONS = [
-  { id: "a", label: "1998", correct: false, votes: 24 },
-  { id: "b", label: "2004", correct: true, votes: 61 },
-  { id: "c", label: "2011", correct: false, votes: 12 },
-  { id: "d", label: "2016", correct: false, votes: 7 },
-]
+interface PollOption {
+  id: string
+  text: string
+  isCorrect?: boolean
+}
+
+interface SessionData {
+  id: string
+  roomCode: string
+  status: string
+  timerSeconds?: number
+}
+
+interface PollData {
+  title: string
+  mode: "quiz" | "vote"
+  question: string
+  options: PollOption[]
+  timerSeconds?: number
+  showResults?: string
+}
+
+interface VoteResult {
+  isCorrect: boolean
+  pointsEarned: number
+  myScore: number
+  myRank: number
+  totalParticipants: number
+  tally: Record<string, number>
+  totalVotes: number
+}
 
 const SWATCHES = ["bg-blue", "bg-navy", "bg-lime", "bg-[#2456b8]"]
 const TEXT = ["text-white", "text-white", "text-navy", "text-white"]
@@ -20,9 +45,203 @@ export function AudienceView() {
   const [stage, setStage] = useState<Stage>("join")
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
-  const [picked, setPicked] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  const totalVotes = OPTIONS.reduce((s, o) => s + o.votes, 0)
+  // Session & participant state
+  const [sessionData, setSessionData] = useState<SessionData | null>(null)
+  const [pollData, setPollData] = useState<PollData | null>(null)
+  const [participantId, setParticipantId] = useState<string | null>(null)
+
+  // Question state
+  const [picked, setPicked] = useState<string | null>(null)
+  const [voteResult, setVoteResult] = useState<VoteResult | null>(null)
+  const [timeLeft, setTimeLeft] = useState<number | null>(null)
+  const [timerEndsAt, setTimerEndsAt] = useState<Date | null>(null)
+
+  // SSE ref
+  const sseRef = useRef<EventSource | null>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [])
+
+  // Countdown timer
+  useEffect(() => {
+    if (!timerEndsAt) return
+    if (timerRef.current) clearInterval(timerRef.current)
+
+    timerRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((timerEndsAt.getTime() - Date.now()) / 1000))
+      setTimeLeft(remaining)
+      if (remaining === 0) {
+        if (timerRef.current) clearInterval(timerRef.current)
+      }
+    }, 500)
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [timerEndsAt])
+
+  function connectSSE(roomCode: string) {
+    if (sseRef.current) sseRef.current.close()
+
+    const es = new EventSource(`/api/sessions/${roomCode}/sse`)
+    sseRef.current = es
+
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        handleSSEEvent(payload)
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    es.onerror = () => {
+      // Reconnect after 3s on error
+      setTimeout(() => {
+        if (stage !== "ended") connectSSE(roomCode)
+      }, 3000)
+    }
+  }
+
+  function handleSSEEvent(payload: { type: string; data: Record<string, unknown> }) {
+    switch (payload.type) {
+      case "session_started": {
+        const d = payload.data as {
+          question: string
+          options: PollOption[]
+          mode: string
+          timerSeconds: number
+          timerEndsAt: string
+        }
+        setPollData((prev) =>
+          prev
+            ? { ...prev, question: d.question, options: d.options }
+            : prev
+        )
+        if (d.timerEndsAt) {
+          setTimerEndsAt(new Date(d.timerEndsAt))
+          setTimeLeft(d.timerSeconds)
+        }
+        setPicked(null)
+        setVoteResult(null)
+        setStage("question")
+        break
+      }
+      case "session_ended":
+        setStage("ended")
+        sseRef.current?.close()
+        break
+      case "vote_update":
+        // Live tally updates for vote mode with showResults='live'
+        if (voteResult && payload.data.tally) {
+          setVoteResult((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  tally: payload.data.tally as Record<string, number>,
+                  totalVotes: payload.data.totalVotes as number,
+                }
+              : prev
+          )
+        }
+        break
+    }
+  }
+
+  async function handleJoin() {
+    if (code.length < 6 || !name.trim()) return
+    setError(null)
+    setLoading(true)
+
+    try {
+      // First, validate the room exists
+      const sessionRes = await fetch(`/api/sessions/${code}`)
+      if (!sessionRes.ok) {
+        const d = await sessionRes.json()
+        setError(d.error ?? "Room not found. Check the code and try again.")
+        console.error('[JOIN] Session lookup failed:', d)
+        return
+      }
+      const { session, poll } = await sessionRes.json()
+
+      // Join the session
+      const joinRes = await fetch(`/api/sessions/${code}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      })
+
+      const joinData = await joinRes.json()
+
+      if (!joinRes.ok) {
+        setError(joinData.error ?? "Failed to join session.")
+        console.error('[JOIN] Failed to join:', joinData)
+        return
+      }
+
+      setSessionData(session)
+      setPollData(poll)
+      setParticipantId(joinData.participant.id)
+
+      // Connect to SSE for live updates
+      connectSSE(code)
+
+      setStage("lobby")
+    } catch (err) {
+      console.error('[JOIN] Exception:', err)
+      setError("Network error. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleVote(optionId: string) {
+    if (picked || !participantId) return
+    setPicked(optionId)
+
+    try {
+      const res = await fetch(`/api/sessions/${code}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantId, optionId }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error ?? "Failed to submit vote.")
+        setPicked(null)
+        return
+      }
+
+      setVoteResult({
+        isCorrect: data.isCorrect,
+        pointsEarned: data.pointsEarned,
+        myScore: data.myScore ?? 0,
+        myRank: data.myRank ?? 1,
+        totalParticipants: data.totalParticipants ?? 1,
+        tally: data.tally ?? {},
+        totalVotes: data.totalVotes ?? 1,
+      })
+
+      setStage("result")
+    } catch {
+      setError("Network error submitting vote.")
+      setPicked(null)
+    }
+  }
+
+  const options = pollData?.options ?? []
+  const totalVotes = voteResult?.totalVotes ?? 1
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-navy px-5 py-8">
@@ -37,11 +256,23 @@ export function AudienceView() {
           </span>
         </div>
 
+        {/* ── JOIN ── */}
         {stage === "join" && (
           <div className="flex flex-1 flex-col justify-center">
             <div className="rounded-3xl bg-white p-6 shadow-xl">
-              <h1 className="text-balance text-center text-xl font-bold text-navy">Join a live session</h1>
-              <p className="mt-1 text-center text-sm text-muted-foreground">Enter the 6-digit room code from the host.</p>
+              <h1 className="text-balance text-center text-xl font-bold text-navy">
+                Join a live session
+              </h1>
+              <p className="mt-1 text-center text-sm text-muted-foreground">
+                Enter the 6-digit room code from the host.
+              </p>
+
+              {error && (
+                <div className="mt-4 flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <X className="mt-0.5 size-4 shrink-0" />
+                  {error}
+                </div>
+              )}
 
               <label className="mt-6 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Room code
@@ -50,7 +281,10 @@ export function AudienceView() {
                 inputMode="numeric"
                 maxLength={6}
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(e) => {
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  setError(null)
+                }}
                 placeholder="000000"
                 className="mt-2 w-full rounded-2xl border-2 border-input bg-canvas py-4 text-center font-mono text-3xl font-bold tracking-[0.4em] text-navy outline-none placeholder:text-muted-foreground/40 focus:border-blue"
               />
@@ -63,117 +297,162 @@ export function AudienceView() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Sam"
                 className="mt-2 w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none focus:border-blue"
+                onKeyDown={(e) => e.key === "Enter" && handleJoin()}
               />
 
               <button
-                disabled={code.length < 6 || !name}
-                onClick={() => setStage("lobby")}
+                disabled={code.length < 6 || !name.trim() || loading}
+                onClick={handleJoin}
                 className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 text-base font-semibold text-primary-foreground transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Join session
-                <ArrowRight className="size-5" />
+                {loading ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <>
+                    Join session
+                    <ArrowRight className="size-5" />
+                  </>
+                )}
               </button>
             </div>
-            <p className="mt-5 text-center text-xs text-white/50">By joining you agree to PollHive&apos;s terms.</p>
+            <p className="mt-5 text-center text-xs text-white/50">
+              By joining you agree to PollHive&apos;s terms.
+            </p>
           </div>
         )}
 
+        {/* ── LOBBY ── */}
         {stage === "lobby" && (
           <div className="flex flex-1 flex-col items-center justify-center text-center">
             <div className="flex size-20 items-center justify-center rounded-full bg-lime">
               <Loader2 className="size-9 animate-spin text-navy" />
             </div>
-            <h1 className="mt-6 text-2xl font-bold text-white">You&apos;re in, {name}!</h1>
+            <h1 className="mt-6 text-2xl font-bold text-white">
+              You&apos;re in, {name}!
+            </h1>
             <p className="mt-2 text-balance text-white/70">
               Waiting for the host to start. Keep this screen open.
             </p>
             <div className="mt-5 rounded-full bg-white/10 px-4 py-2 font-mono text-sm tracking-widest text-lime">
               ROOM {code}
             </div>
-            <button
-              onClick={() => setStage("question")}
-              className="mt-8 rounded-full bg-white/10 px-5 py-2 text-xs font-medium text-white/60 hover:text-white"
-            >
-              (demo: simulate host start)
-            </button>
+            {pollData && (
+              <div className="mt-4 rounded-2xl bg-white/10 px-5 py-3 text-center">
+                <p className="text-xs text-white/60">Poll</p>
+                <p className="text-sm font-semibold text-white">{pollData.title}</p>
+              </div>
+            )}
           </div>
         )}
 
-        {stage === "question" && (
+        {/* ── QUESTION ── */}
+        {stage === "question" && pollData && (
           <div className="flex flex-1 flex-col">
             <div className="flex items-center justify-between pt-2 text-sm text-white/80">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 font-medium">
                 <Trophy className="size-3.5 text-lime" />
-                Question 3 of 12
+                {pollData.mode === "quiz" ? "Quiz" : "Vote"}
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-lime px-3 py-1 font-semibold text-navy">
-                <Timer className="size-3.5" />
-                18s
-              </span>
+              {timeLeft !== null && timeLeft > 0 && (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold",
+                    timeLeft <= 5 ? "bg-destructive text-white" : "bg-lime text-navy"
+                  )}
+                >
+                  <Timer className="size-3.5" />
+                  {timeLeft}s
+                </span>
+              )}
             </div>
 
             <div className="mt-5 rounded-3xl bg-white p-6 shadow-xl">
               <p className="text-balance text-lg font-bold leading-snug text-navy">
-                Which year was the company founded?
+                {pollData.question}
               </p>
             </div>
 
+            {error && (
+              <div className="mt-3 rounded-xl bg-destructive/20 px-3 py-2 text-xs text-red-200">
+                {error}
+              </div>
+            )}
+
             <div className="mt-4 grid flex-1 grid-cols-2 gap-3 content-start">
-              {OPTIONS.map((o, i) => (
+              {options.map((o, i) => (
                 <button
                   key={o.id}
-                  onClick={() => {
-                    setPicked(o.id)
-                    setTimeout(() => setStage("result"), 600)
-                  }}
+                  onClick={() => handleVote(o.id)}
+                  disabled={!!picked}
                   className={cn(
                     "flex min-h-[112px] flex-col items-start justify-between rounded-2xl p-4 text-left font-semibold shadow-md transition-all active:scale-95",
-                    SWATCHES[i],
-                    TEXT[i],
+                    SWATCHES[i % SWATCHES.length],
+                    TEXT[i % TEXT.length],
                     picked && picked !== o.id && "opacity-40",
                     picked === o.id && "ring-4 ring-white",
+                    picked && "cursor-not-allowed"
                   )}
                 >
                   <span className="flex size-7 items-center justify-center rounded-full bg-white/25 text-sm">
                     {String.fromCharCode(65 + i)}
                   </span>
-                  <span className="text-base">{o.label}</span>
+                  <span className="text-base">{o.text}</span>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {stage === "result" && (
+        {/* ── RESULT ── */}
+        {stage === "result" && pollData && voteResult && (
           <div className="flex flex-1 flex-col">
             <div className="mt-2 rounded-3xl bg-white p-6 shadow-xl">
               <div className="flex items-center justify-center gap-2 text-center">
-                {picked === "b" ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-lime px-4 py-1.5 text-sm font-bold text-navy">
-                    <Check className="size-4" /> Correct! +100 pts
-                  </span>
+                {pollData.mode === "quiz" ? (
+                  voteResult.isCorrect ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-lime px-4 py-1.5 text-sm font-bold text-navy">
+                      <Check className="size-4" /> Correct! +{voteResult.pointsEarned} pts
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-destructive px-4 py-1.5 text-sm font-bold text-destructive-foreground">
+                      Not quite —{" "}
+                      {options.find((o) => o.isCorrect)?.text ?? "wrong answer"}
+                    </span>
+                  )
                 ) : (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-destructive px-4 py-1.5 text-sm font-bold text-destructive-foreground">
-                    Not quite — answer was 2004
+                  <span className="inline-flex items-center gap-2 rounded-full bg-blue px-4 py-1.5 text-sm font-bold text-white">
+                    <Check className="size-4" /> Vote recorded!
                   </span>
                 )}
               </div>
 
               <p className="mt-5 text-sm font-semibold text-navy">Live results</p>
               <div className="mt-3 space-y-3">
-                {OPTIONS.map((o) => {
-                  const pct = Math.round((o.votes / totalVotes) * 100)
+                {options.map((o) => {
+                  const votes = voteResult.tally[o.id] ?? 0
+                  const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0
                   return (
                     <div key={o.id}>
                       <div className="flex items-center justify-between text-sm">
-                        <span className={cn("font-medium", o.correct ? "text-navy" : "text-foreground")}>
-                          {o.label} {o.correct && <Check className="ml-1 inline size-3.5 text-blue" />}
+                        <span
+                          className={cn(
+                            "font-medium",
+                            o.isCorrect ? "text-navy font-semibold" : "text-foreground"
+                          )}
+                        >
+                          {o.text}{" "}
+                          {o.isCorrect && (
+                            <Check className="ml-1 inline size-3.5 text-blue" />
+                          )}
                         </span>
                         <span className="text-muted-foreground">{pct}%</span>
                       </div>
                       <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-canvas">
                         <div
-                          className={cn("h-full rounded-full", o.correct ? "bg-lime" : "bg-blue")}
+                          className={cn(
+                            "h-full rounded-full transition-all duration-500",
+                            o.isCorrect ? "bg-lime" : "bg-blue"
+                          )}
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -183,20 +462,60 @@ export function AudienceView() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-2xl bg-white/10 p-4 text-center text-white">
-              <p className="text-xs uppercase tracking-wider text-white/60">Your rank</p>
-              <p className="mt-1 text-3xl font-bold text-lime">#4</p>
-              <p className="text-sm text-white/70">of 214 players · 380 pts</p>
-            </div>
+            {pollData.mode === "quiz" && (
+              <div className="mt-4 rounded-2xl bg-white/10 p-4 text-center text-white">
+                <p className="text-xs uppercase tracking-wider text-white/60">Your rank</p>
+                <p className="mt-1 text-3xl font-bold text-lime">
+                  #{voteResult.myRank}
+                </p>
+                <p className="text-sm text-white/70">
+                  of {voteResult.totalParticipants} players · {voteResult.myScore} pts
+                </p>
+              </div>
+            )}
 
+            <div className="mt-4 rounded-2xl bg-white/10 p-4 text-center text-white/60 text-sm">
+              <Loader2 className="mx-auto size-5 animate-spin mb-2 opacity-50" />
+              Waiting for the host to continue…
+            </div>
+          </div>
+        )}
+
+        {/* ── ENDED ── */}
+        {stage === "ended" && (
+          <div className="flex flex-1 flex-col items-center justify-center text-center">
+            <div className="flex size-20 items-center justify-center rounded-full bg-lime">
+              <Trophy className="size-9 text-navy" />
+            </div>
+            <h1 className="mt-6 text-2xl font-bold text-white">Session ended!</h1>
+            <p className="mt-2 text-balance text-white/70">
+              Thanks for participating, {name}! The host has ended the session.
+            </p>
+            {voteResult && pollData?.mode === "quiz" && (
+              <div className="mt-6 rounded-2xl bg-white/10 p-5 text-center text-white">
+                <p className="text-xs uppercase tracking-wider text-white/60">Final rank</p>
+                <p className="mt-1 text-4xl font-bold text-lime">#{voteResult.myRank}</p>
+                <p className="text-sm text-white/70">
+                  {voteResult.myScore} total points
+                </p>
+              </div>
+            )}
             <button
               onClick={() => {
+                setStage("join")
+                setCode("")
+                setName("")
                 setPicked(null)
-                setStage("question")
+                setVoteResult(null)
+                setParticipantId(null)
+                setSessionData(null)
+                setPollData(null)
+                setError(null)
+                sseRef.current?.close()
               }}
-              className="mt-auto rounded-2xl bg-lime py-4 text-base font-semibold text-navy transition-all hover:brightness-105"
+              className="mt-8 rounded-2xl bg-white/10 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/20"
             >
-              Next question
+              Join another session
             </button>
           </div>
         )}

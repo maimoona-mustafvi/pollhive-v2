@@ -1,9 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { polls, type PollStatus } from "@/lib/polls"
 import { PollCard } from "@/components/poll-card"
 import { cn } from "@/lib/utils"
+
+type PollStatus = "live" | "scheduled" | "ended" | "draft"
+
+interface Poll {
+  id: string
+  title: string
+  mode: "quiz" | "vote"
+  roomCode: string
+  status: PollStatus
+  participants: number
+  questions: number
+  updated: string
+}
 
 const FILTERS: { key: "all" | PollStatus; label: string }[] = [
   { key: "all", label: "All" },
@@ -13,7 +25,7 @@ const FILTERS: { key: "all" | PollStatus; label: string }[] = [
   { key: "draft", label: "Drafts" },
 ]
 
-export function MyPollsContent() {
+export function MyPollsContent({ polls }: { polls: Poll[] }) {
   const [filter, setFilter] = useState<"all" | PollStatus>("all")
   const filtered = filter === "all" ? polls : polls.filter((p) => p.status === filter)
 
@@ -21,7 +33,8 @@ export function MyPollsContent() {
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => {
-          const count = f.key === "all" ? polls.length : polls.filter((p) => p.status === f.key).length
+          const count =
+            f.key === "all" ? polls.length : polls.filter((p) => p.status === f.key).length
           return (
             <button
               key={f.key}
@@ -30,14 +43,14 @@ export function MyPollsContent() {
                 "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors",
                 filter === f.key
                   ? "bg-navy text-white"
-                  : "bg-card text-muted-foreground ring-1 ring-border/60 hover:text-navy",
+                  : "bg-card text-muted-foreground ring-1 ring-border/60 hover:text-navy"
               )}
             >
               {f.label}
               <span
                 className={cn(
                   "rounded-full px-1.5 text-xs",
-                  filter === f.key ? "bg-white/20 text-white" : "bg-canvas text-muted-foreground",
+                  filter === f.key ? "bg-white/20 text-white" : "bg-canvas text-muted-foreground"
                 )}
               >
                 {count}

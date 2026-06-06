@@ -3,24 +3,60 @@
 import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Hexagon, Mail, Lock, User, ArrowLeft, Check } from "lucide-react"
 
 type Mode = "login" | "signup"
 
 export function AuthForm() {
   const router = useRouter()
-  const [mode, setMode] = useState<Mode>("login")
+  const searchParams = useSearchParams()
+  const from = searchParams.get("from") ?? "/dashboard"
 
-  function handleSubmit(e: React.FormEvent) {
+  const [mode, setMode] = useState<Mode>("login")
+  const [fullName, setFullName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Demo flow: proceed to the host dashboard.
-    router.push("/dashboard")
+    setError(null)
+    setLoading(true)
+
+    try {
+      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/signup"
+      const body =
+        mode === "login"
+          ? { email, password }
+          : { email, password, fullName }
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error ?? "Something went wrong. Please try again.")
+        return
+      }
+
+      router.push(from)
+      router.refresh()
+    } catch {
+      setError("Network error. Please check your connection.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-navy">
-      {/* Decorative blue accents */}
+      {/* Decorative accents */}
       <div className="pointer-events-none absolute -left-32 -top-32 size-96 rounded-full bg-blue/30 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-40 -right-24 size-96 rounded-full bg-blue/20 blur-3xl" />
 
@@ -44,7 +80,7 @@ export function AuthForm() {
 
       <main className="relative z-10 flex flex-1 items-center justify-center px-6 pb-16">
         <div className="grid w-full max-w-5xl items-center gap-10 lg:grid-cols-2">
-          {/* Left: brand panel */}
+          {/* Left brand panel */}
           <div className="hidden flex-col gap-6 lg:flex">
             <div className="inline-flex w-fit items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-medium text-lime">
               <span className="size-1.5 rounded-full bg-lime" />
@@ -69,18 +105,19 @@ export function AuthForm() {
             </ul>
           </div>
 
-          {/* Right: auth card */}
+          {/* Right auth card */}
           <div className="mx-auto w-full max-w-md rounded-3xl border border-white/10 bg-white p-8 shadow-2xl">
-            {/* Mode toggle */}
             <div className="flex rounded-full bg-canvas p-1">
               {(["login", "signup"] as Mode[]).map((m) => (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setMode(m)}
+                  onClick={() => { setMode(m); setError(null) }}
                   className={
                     "flex-1 rounded-full px-4 py-2 text-sm font-semibold transition-colors " +
-                    (mode === m ? "bg-navy text-white shadow-sm" : "text-muted-foreground hover:text-navy")
+                    (mode === m
+                      ? "bg-navy text-white shadow-sm"
+                      : "text-muted-foreground hover:text-navy")
                   }
                 >
                   {m === "login" ? "Sign in" : "Sign up"}
@@ -97,30 +134,56 @@ export function AuthForm() {
                 : "Start hosting interactive polls in minutes."}
             </p>
 
+            {error && (
+              <div className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
+                {error}
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
               {mode === "signup" && (
-                <Field icon={User} label="Full name" type="text" placeholder="Maya Anderson" autoComplete="name" />
+                <Field
+                  icon={User}
+                  label="Full name"
+                  type="text"
+                  placeholder="Maya Anderson"
+                  autoComplete="name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
               )}
-              <Field icon={Mail} label="Email" type="email" placeholder="you@company.com" autoComplete="email" />
+              <Field
+                icon={Mail}
+                label="Email"
+                type="email"
+                placeholder="you@company.com"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
               <Field
                 icon={Lock}
                 label="Password"
                 type="password"
                 placeholder="••••••••"
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
               />
-
-              {mode === "login" && (
-                <button type="button" className="self-end text-xs font-medium text-blue hover:underline">
-                  Forgot password?
-                </button>
-              )}
 
               <button
                 type="submit"
-                className="mt-1 w-full rounded-full bg-lime px-4 py-3 text-sm font-semibold text-navy shadow-sm transition-colors hover:brightness-95"
+                disabled={loading}
+                className="mt-1 w-full rounded-full bg-lime px-4 py-3 text-sm font-semibold text-navy shadow-sm transition-all hover:brightness-95 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {mode === "login" ? "Sign in" : "Create account"}
+                {loading
+                  ? "Please wait…"
+                  : mode === "login"
+                  ? "Sign in"
+                  : "Create account"}
               </button>
             </form>
 
@@ -128,7 +191,7 @@ export function AuthForm() {
               {mode === "login" ? "New to PollHive? " : "Already have an account? "}
               <button
                 type="button"
-                onClick={() => setMode(mode === "login" ? "signup" : "login")}
+                onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(null) }}
                 className="font-semibold text-navy hover:underline"
               >
                 {mode === "login" ? "Create an account" : "Sign in"}
@@ -147,12 +210,18 @@ function Field({
   type,
   placeholder,
   autoComplete,
+  value,
+  onChange,
+  required,
 }: {
   icon: React.ElementType
   label: string
   type: string
   placeholder: string
   autoComplete?: string
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  required?: boolean
 }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -161,9 +230,11 @@ function Field({
         <Icon className="size-4.5 shrink-0 text-muted-foreground" />
         <input
           type={type}
-          required
+          required={required}
           placeholder={placeholder}
           autoComplete={autoComplete}
+          value={value}
+          onChange={onChange}
           className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
         />
       </div>

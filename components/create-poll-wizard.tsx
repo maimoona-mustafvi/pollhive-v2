@@ -1,25 +1,118 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Trophy, Timer, Vote, CheckCircle2, Copy, Check, Rocket, RefreshCw } from "lucide-react"
+import { Trophy, Timer, Vote, CheckCircle2, Copy, Check, Rocket, RefreshCw, Loader2 } from "lucide-react"
 
 type Mode = "quiz" | "vote" | null
 
+const OPTION_IDS = ["a", "b", "c", "d"]
+
 export function CreatePollWizard() {
+  const router = useRouter()
   const [mode, setMode] = useState<Mode>("quiz")
+  const [title, setTitle] = useState("")
+  const [question, setQuestion] = useState("")
+  const [options, setOptions] = useState(["", "", "", ""])
   const [correct, setCorrect] = useState(0)
   const [seconds, setSeconds] = useState(20)
   const [points, setPoints] = useState(100)
   const [anonymous, setAnonymous] = useState(true)
   const [showResults, setShowResults] = useState("after")
+  const [pollId, setPollId] = useState<string | null>(null)
   const [roomCode, setRoomCode] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [launching, setLaunching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const generateCode = () => {
-    const code = String(Math.floor(100000 + Math.random() * 900000))
-    setRoomCode(code)
-    setCopied(false)
+  function updateOption(index: number, value: string) {
+    setOptions((prev) => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
+  }
+
+  const filledOptions = options.filter((o) => o.trim())
+  const canLaunch = mode && title.trim() && question.trim() && filledOptions.length >= 2
+
+  async function savePoll(): Promise<string | null> {
+    if (!canLaunch) {
+      setError("Please fill in a title, question, and at least 2 options.")
+      return null
+    }
+
+    setSaving(true)
+    setError(null)
+
+    try {
+      const pollOptions = options
+        .filter((o) => o.trim())
+        .map((text, i) => ({
+          id: OPTION_IDS[i],
+          text: text.trim(),
+          isCorrect: mode === "quiz" ? i === correct : false,
+        }))
+
+      const body =
+        mode === "quiz"
+          ? { title, mode, question, options: pollOptions, points, timerSeconds: seconds }
+          : { title, mode, question, options: pollOptions, anonymous, showResults }
+
+      const res = await fetch("/api/polls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? "Failed to save poll.")
+        return null
+      }
+
+      setPollId(data.poll._id)
+      return data.poll._id
+    } catch {
+      setError("Network error saving poll.")
+      return null
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleGenerateAndLaunch() {
+    setError(null)
+    let id = pollId
+
+    if (!id) {
+      id = await savePoll()
+      if (!id) return
+    }
+
+    setLaunching(true)
+    try {
+      const res = await fetch("/api/sessions/launch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pollId: id }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? "Failed to launch session.")
+        return
+      }
+
+      setRoomCode(data.session.roomCode)
+      setCopied(false)
+    } catch {
+      setError("Network error launching session.")
+    } finally {
+      setLaunching(false)
+    }
   }
 
   const copyCode = () => {
@@ -27,6 +120,12 @@ export function CreatePollWizard() {
     navigator.clipboard?.writeText(roomCode)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
+  }
+
+  function handleGoToSession() {
+    if (roomCode) {
+      router.push(`/dashboard`)
+    }
   }
 
   return (
@@ -61,13 +160,30 @@ export function CreatePollWizard() {
               {mode === "quiz" ? "Question details" : "Your poll question"}
             </h2>
 
-            <label className="mt-5 block text-sm font-medium text-foreground" htmlFor="q">
+            <label className="mt-5 block text-sm font-medium text-foreground" htmlFor="title">
+              Poll title (for your dashboard)
+            </label>
+            <input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Q2 All-Hands Trivia"
+              className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none ring-ring/40 placeholder:text-muted-foreground focus:border-ring focus:ring-2"
+            />
+
+            <label className="mt-4 block text-sm font-medium text-foreground" htmlFor="q">
               Question
             </label>
             <textarea
               id="q"
               rows={3}
-              placeholder={mode === "quiz" ? "e.g. Which year was the company founded?" : "e.g. Which logo direction do you prefer?"}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder={
+                mode === "quiz"
+                  ? "e.g. Which year was the company founded?"
+                  : "e.g. Which logo direction do you prefer?"
+              }
               className="mt-2 w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none ring-ring/40 placeholder:text-muted-foreground focus:border-ring focus:ring-2"
             />
 
@@ -84,7 +200,9 @@ export function CreatePollWizard() {
                       aria-label={`Mark option ${i + 1} correct`}
                       className={cn(
                         "flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-                        correct === i ? "border-lime bg-lime text-navy" : "border-input text-transparent hover:border-blue",
+                        correct === i
+                          ? "border-lime bg-lime text-navy"
+                          : "border-input text-transparent hover:border-blue"
                       )}
                     >
                       <CheckCircle2 className="size-4" />
@@ -95,10 +213,12 @@ export function CreatePollWizard() {
                     </span>
                   )}
                   <input
-                    placeholder={`Option ${i + 1}`}
+                    value={options[i]}
+                    onChange={(e) => updateOption(i, e.target.value)}
+                    placeholder={`Option ${i + 1}${i < 2 ? " (required)" : " (optional)"}`}
                     className={cn(
                       "w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none ring-ring/40 placeholder:text-muted-foreground focus:border-ring focus:ring-2",
-                      mode === "quiz" && correct === i && "border-lime/70 bg-lime/10",
+                      mode === "quiz" && correct === i && "border-lime/70 bg-lime/10"
                     )}
                   />
                 </div>
@@ -125,7 +245,9 @@ export function CreatePollWizard() {
                     <label className="text-sm font-medium text-foreground" htmlFor="timer">
                       Countdown timer
                     </label>
-                    <span className="rounded-md bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">{seconds}s</span>
+                    <span className="rounded-md bg-navy/10 px-2 py-0.5 text-xs font-semibold text-navy">
+                      {seconds}s
+                    </span>
                   </div>
                   <input
                     id="timer"
@@ -153,13 +275,13 @@ export function CreatePollWizard() {
                     onClick={() => setAnonymous((a) => !a)}
                     className={cn(
                       "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-                      anonymous ? "bg-primary" : "bg-input",
+                      anonymous ? "bg-primary" : "bg-input"
                     )}
                   >
                     <span
                       className={cn(
                         "absolute top-0.5 size-5 rounded-full bg-white transition-transform",
-                        anonymous ? "translate-x-5" : "translate-x-0.5",
+                        anonymous ? "translate-x-5" : "translate-x-0.5"
                       )}
                     />
                   </button>
@@ -190,8 +312,14 @@ export function CreatePollWizard() {
         <div className="rounded-2xl bg-navy p-6 text-white shadow-sm">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-white/60">Launch session</h3>
           <p className="mt-2 text-sm text-white/75">
-            Generate a room code and share it. Audiences join at pollhive.app/join.
+            Create your poll and get a room code to share with your audience.
           </p>
+
+          {error && (
+            <div className="mt-4 rounded-xl bg-destructive/20 px-3 py-2 text-xs text-red-200">
+              {error}
+            </div>
+          )}
 
           <div className="mt-5 rounded-xl bg-white/10 p-4 text-center">
             <p className="text-[10px] font-medium uppercase tracking-wider text-white/50">Room code</p>
@@ -202,11 +330,16 @@ export function CreatePollWizard() {
 
           {!roomCode ? (
             <button
-              onClick={generateCode}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground transition-colors hover:brightness-105"
+              onClick={handleGenerateAndLaunch}
+              disabled={saving || launching || !canLaunch}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground transition-colors hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <RefreshCw className="size-4" />
-              Generate Room Code
+              {saving || launching ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="size-4" />
+              )}
+              {saving ? "Saving…" : launching ? "Launching…" : "Generate & Launch"}
             </button>
           ) : (
             <div className="mt-4 space-y-3">
@@ -217,19 +350,21 @@ export function CreatePollWizard() {
                 {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                 {copied ? "Copied!" : "Copy Code"}
               </button>
-              <button className="flex w-full items-center justify-center gap-2 rounded-xl bg-lime py-3 text-sm font-semibold text-navy transition-colors hover:brightness-105">
+              <button
+                onClick={handleGoToSession}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-lime py-3 text-sm font-semibold text-navy transition-colors hover:brightness-105"
+              >
                 <Rocket className="size-4" />
-                Launch Poll
+                Go to Dashboard
               </button>
             </div>
           )}
 
-          <button
-            onClick={generateCode}
-            className={cn("mt-3 w-full text-center text-xs text-white/50 hover:text-white", !roomCode && "hidden")}
-          >
-            Regenerate code
-          </button>
+          {roomCode && (
+            <p className="mt-3 text-center text-xs text-white/60">
+              Share code <strong className="text-lime">{roomCode}</strong> with your audience at pollhive.app/join
+            </p>
+          )}
         </div>
       </aside>
     </div>
@@ -257,14 +392,14 @@ function ModeCard({
       onClick={onClick}
       className={cn(
         "group relative flex flex-col items-start rounded-2xl border-2 p-5 text-left transition-all",
-        active ? "border-blue bg-blue/5 shadow-sm" : "border-border bg-card hover:border-blue/40",
+        active ? "border-blue bg-blue/5 shadow-sm" : "border-border bg-card hover:border-blue/40"
       )}
     >
       <div className="flex items-center gap-2">
         <span
           className={cn(
             "flex size-12 items-center justify-center rounded-xl transition-colors",
-            active ? "bg-navy text-lime" : "bg-canvas text-navy",
+            active ? "bg-navy text-lime" : "bg-canvas text-navy"
           )}
         >
           <Primary className="size-6" />
@@ -280,7 +415,7 @@ function ModeCard({
       <span
         className={cn(
           "absolute right-4 top-4 flex size-5 items-center justify-center rounded-full border-2 transition-colors",
-          active ? "border-blue bg-blue" : "border-input",
+          active ? "border-blue bg-blue" : "border-input"
         )}
       >
         {active && <Check className="size-3 text-white" />}

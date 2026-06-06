@@ -1,0 +1,91 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { connectDB } from '@/lib/mongodb'
+import Session from '@/models/Session'
+import Participant from '@/models/Participant'
+import { emitToRoom } from '@/lib/sse-emitter'
+import { z } from 'zod'
+
+const JoinSchema = z.object({
+  name: z
+    .string()
+    .min(1, 'Name is required')
+    .max(50, 'Name too long')
+    .trim(),
+})
+
+export async function POST(
+  req: NextRequest,
+  context: any
+) {
+  const { code } = await context.params
+
+  try {
+    const body = await req.json()
+    const parsed = JoinSchema.safeParse(body)
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.errors[0].message },
+        { status: 400 }
+      )
+    }
+
+    await connectDB()
+
+    console.log(`[JOIN_SESSION] Attempting to join room: ${code}`)
+
+    const session = await Session.findOne({
+      roomCode: code,
+      status: { $ne: 'ended' },
+    })
+
+    if (!session) {
+      console.log(`[JOIN_SESSION] Session not found for code: ${code}`)
+      return NextResponse.json(
+        { error: 'Room not found or session has ended' },
+        { status: 404 }
+      )
+    }
+
+    console.log(`[JOIN_SESSION] Found session: ${session._id}, status: ${session.status}`)
+
+    // Create participant
+    const participant = await Participant.create({
+      sessionId: session._id,
+      name: parsed.data.name,
+    })
+
+    // Increment participant count
+    await Session.findByIdAndUpdate(session._id, {
+      $inc: { participantCount: 1 },
+    })
+
+    // Also update the Poll total participants count out of convenience for the dashboard
+    await Poll.findByIdAndUpdate(session.pollId, {
+      $inc: { totalParticipants: 1 },
+    })
+
+    console.log(`[JOIN_SESSION] Created participant: ${participant._id}`)
+
+    // Notify everyone in the room that someone joined
+    emitToRoom(code, {
+      type: 'vote_update',
+      data: {
+        participantCount: session.participantCount + 1,
+        event: 'participant_joined',
+        participantName: parsed.data.name,
+      },
+    })
+
+    return NextResponse.json({
+      participant: {
+        id: participant._id.toString(),
+        name: participant.name,
+        sessionId: session._id.toString(),
+      },
+    })
+  } catch (err) {
+    console.error('[JOIN_SESSION]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
