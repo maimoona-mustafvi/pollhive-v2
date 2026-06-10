@@ -5,14 +5,14 @@ import Poll from '@/models/Poll'
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id } = await params
   await connectDB()
 
   const poll = await Poll.findOne({ _id: id, hostId: session.userId }).lean()
@@ -25,14 +25,14 @@ export async function GET(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id } = await params
   await connectDB()
 
   const poll = await Poll.findOneAndDelete({ _id: id, hostId: session.userId })

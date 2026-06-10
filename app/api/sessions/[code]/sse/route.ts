@@ -13,9 +13,9 @@ export const runtime = 'nodejs'
  */
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ code: string }> }
+  context: { params: Promise<{ code: string }> }
 ) {
-  const { code } = await params
+  const { code } = await context.params
 
   const encoder = new TextEncoder()
 

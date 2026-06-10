@@ -3,7 +3,8 @@
 import { useState } from "react"
 import type { Poll } from "@/lib/polls"
 import { cn } from "@/lib/utils"
-import { Trophy, Vote, Users, Copy, Check, MoreHorizontal } from "lucide-react"
+import Link from "next/link"
+import { Check, Copy, MoreHorizontal, Trophy, Users, Vote } from "lucide-react"
 
 const STATUS_STYLES: Record<Poll["status"], { label: string; dot: string; text: string; bg: string }> = {
   live: { label: "Live", dot: "bg-lime", text: "text-navy", bg: "bg-lime" },
@@ -74,9 +75,15 @@ export function PollCard({ poll }: { poll: Poll }) {
           {poll.participants.toLocaleString()}
           <span className="text-muted-foreground">joined</span>
         </span>
-        <button className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-canvas hover:text-navy">
-          <MoreHorizontal className="size-4.5" />
-        </button>
+          {poll.status === "live" ? (
+              <Link href={`/host/${poll.roomCode}`} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-blue transition-colors hover:bg-canvas">
+                Manage →
+              </Link>
+            ) : (
+            <button className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-canvas hover:text-navy">
+              <MoreHorizontal className="size-4.5" />
+            </button>
+        )}
       </div>
     </div>
   )

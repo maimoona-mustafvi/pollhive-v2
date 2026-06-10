@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
 import Session from '@/models/Session'
 import Participant from '@/models/Participant'
+import Poll from '@/models/Poll'          // ← THIS WAS MISSING
 import { emitToRoom } from '@/lib/sse-emitter'
 import { z } from 'zod'
 
@@ -15,7 +16,7 @@ const JoinSchema = z.object({
 
 export async function POST(
   req: NextRequest,
-  context: any
+  context: { params: Promise<{ code: string }> }
 ) {
   const { code } = await context.params
 
@@ -60,7 +61,7 @@ export async function POST(
       $inc: { participantCount: 1 },
     })
 
-    // Also update the Poll total participants count out of convenience for the dashboard
+    // Update poll total participants
     await Poll.findByIdAndUpdate(session.pollId, {
       $inc: { totalParticipants: 1 },
     })
@@ -83,6 +84,8 @@ export async function POST(
         name: participant.name,
         sessionId: session._id.toString(),
       },
+      // Return session status so client knows if already live
+      sessionStatus: session.status,
     })
   } catch (err) {
     console.error('[JOIN_SESSION]', err)

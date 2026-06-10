@@ -7,9 +7,9 @@ import Participant from '@/models/Participant'
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ code: string }> }
+  context: { params: Promise<{ code: string }> }
 ) {
-  const { code } = await params
+  const { code } = await context.params
   await connectDB()
 
   const session = await Session.findOne({ roomCode: code }).lean()

@@ -48,22 +48,24 @@ export function AudienceView() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Session & participant state
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [pollData, setPollData] = useState<PollData | null>(null)
   const [participantId, setParticipantId] = useState<string | null>(null)
 
-  // Question state
   const [picked, setPicked] = useState<string | null>(null)
   const [voteResult, setVoteResult] = useState<VoteResult | null>(null)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [timerEndsAt, setTimerEndsAt] = useState<Date | null>(null)
 
-  // SSE ref
   const sseRef = useRef<EventSource | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Use a ref to track stage inside SSE callbacks to avoid stale closures
+  const stageRef = useRef<Stage>("join")
 
-  // Cleanup SSE on unmount
+  useEffect(() => {
+    stageRef.current = stage
+  }, [stage])
+
   useEffect(() => {
     return () => {
       sseRef.current?.close()
@@ -71,7 +73,6 @@ export function AudienceView() {
     }
   }, [])
 
-  // Countdown timer
   useEffect(() => {
     if (!timerEndsAt) return
     if (timerRef.current) clearInterval(timerRef.current)
@@ -105,9 +106,9 @@ export function AudienceView() {
     }
 
     es.onerror = () => {
-      // Reconnect after 3s on error
+      // Use stageRef to avoid stale closure
       setTimeout(() => {
-        if (stage !== "ended") connectSSE(roomCode)
+        if (stageRef.current !== "ended") connectSSE(roomCode)
       }, 3000)
     }
   }
@@ -141,7 +142,6 @@ export function AudienceView() {
         sseRef.current?.close()
         break
       case "vote_update":
-        // Live tally updates for vote mode with showResults='live'
         if (voteResult && payload.data.tally) {
           setVoteResult((prev) =>
             prev
@@ -163,17 +163,16 @@ export function AudienceView() {
     setLoading(true)
 
     try {
-      // First, validate the room exists
+      // 1. Validate the room exists and get poll/session data
       const sessionRes = await fetch(`/api/sessions/${code}`)
       if (!sessionRes.ok) {
         const d = await sessionRes.json()
         setError(d.error ?? "Room not found. Check the code and try again.")
-        console.error('[JOIN] Session lookup failed:', d)
         return
       }
       const { session, poll } = await sessionRes.json()
 
-      // Join the session
+      // 2. Join the session
       const joinRes = await fetch(`/api/sessions/${code}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -184,7 +183,6 @@ export function AudienceView() {
 
       if (!joinRes.ok) {
         setError(joinData.error ?? "Failed to join session.")
-        console.error('[JOIN] Failed to join:', joinData)
         return
       }
 
@@ -192,10 +190,33 @@ export function AudienceView() {
       setPollData(poll)
       setParticipantId(joinData.participant.id)
 
-      // Connect to SSE for live updates
+      // 3. Connect SSE for live updates
       connectSSE(code)
 
-      setStage("lobby")
+      // 4. If the session is already live, jump straight to the question stage
+      //    instead of waiting in the lobby for a session_started event that
+      //    will never come (it already fired before we joined).
+      const alreadyLive =
+        joinData.sessionStatus === "live" || session.status === "live"
+
+      if (alreadyLive) {
+        // Fetch current results to get the timer info
+        const resultsRes = await fetch(`/api/sessions/${code}/results`)
+        if (resultsRes.ok) {
+          const results = await resultsRes.json()
+          if (results.timerEndsAt) {
+            const endsAt = new Date(results.timerEndsAt)
+            // Only start timer if there's still time left
+            if (endsAt.getTime() > Date.now()) {
+              setTimerEndsAt(endsAt)
+              setTimeLeft(Math.ceil((endsAt.getTime() - Date.now()) / 1000))
+            }
+          }
+        }
+        setStage("question")
+      } else {
+        setStage("lobby")
+      }
     } catch (err) {
       console.error('[JOIN] Exception:', err)
       setError("Network error. Please try again.")

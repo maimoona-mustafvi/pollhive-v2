@@ -8,14 +8,14 @@ import { emitToRoom } from '@/lib/sse-emitter'
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ code: string }> }
+  context: { params: Promise<{ code: string }> }
 ) {
+  const { code } = await context.params
   const authSession = await getSession()
   if (!authSession) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { code } = await params
   await connectDB()
 
   const session = await Session.findOne({

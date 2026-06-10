@@ -123,10 +123,10 @@ export function CreatePollWizard() {
   }
 
   function handleGoToSession() {
-    if (roomCode) {
-      router.push(`/dashboard`)
-    }
+  if (roomCode) {
+    router.push(`/host/${roomCode}`)  // was /dashboard
   }
+}
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
