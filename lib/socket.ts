@@ -1,4 +1,3 @@
-// lib/socket.ts
 import { Server as SocketIOServer } from 'socket.io'
 import { createAdapter } from '@socket.io/redis-adapter'
 import { createClient } from 'redis'
@@ -18,7 +17,6 @@ export async function initSocket(httpServer: HTTPServer): Promise<SocketIOServer
     path: '/api/socketio',
   })
 
-  // Redis adapter so all server instances share the same socket rooms
   const pubClient = createClient({ url: process.env.REDIS_URL ?? 'redis://localhost:6379' })
   const subClient = pubClient.duplicate()
 
@@ -34,7 +32,6 @@ export async function initSocket(httpServer: HTTPServer): Promise<SocketIOServer
     socket.on('join_room', (roomCode: string) => {
       socket.join(roomCode)
     })
-
     socket.on('leave_room', (roomCode: string) => {
       socket.leave(roomCode)
     })
@@ -43,11 +40,15 @@ export async function initSocket(httpServer: HTTPServer): Promise<SocketIOServer
   return io
 }
 
-export function getIO(): SocketIOServer {
-  if (!global._io) throw new Error('Socket.io not initialized')
-  return global._io
+export function getIO(): SocketIOServer | null {
+  return global._io ?? null
 }
 
 export function emitToRoom(roomCode: string, event: string, data: unknown): void {
-  getIO().to(roomCode).emit(event, data)
+  const io = global._io
+  if (!io) {
+    console.warn(`[Socket] emitToRoom called before Socket.IO init — event: ${event}, room: ${roomCode}`)
+    return
+  }
+  io.to(roomCode).emit(event, data)
 }

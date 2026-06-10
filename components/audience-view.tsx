@@ -198,40 +198,56 @@ export function AudienceView() {
   }
 
   async function handleVote(optionId: string) {
-    if (picked || !participantId) return
-    setPicked(optionId)
+  if (picked || !participantId) return
+  setPicked(optionId)
 
-    try {
-      const res = await fetch(`/api/sessions/${code}/vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ participantId, optionId }),
-      })
+  try {
+    const res = await fetch(`/api/sessions/${code}/vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participantId, optionId }),
+    })
 
-      const data = await res.json()
+    const data = await res.json()
 
-      if (!res.ok) {
-        setError(data.error ?? "Failed to submit vote.")
-        setPicked(null)
-        return
-      }
-
-      setVoteResult({
-        isCorrect: data.isCorrect,
-        pointsEarned: data.pointsEarned,
-        myScore: data.myScore ?? 0,
-        myRank: data.myRank ?? 1,
-        totalParticipants: data.totalParticipants ?? 1,
-        tally: data.tally ?? {},
-        totalVotes: data.totalVotes ?? 1,
-      })
-
-      setStage("result")
-    } catch {
-      setError("Network error submitting vote.")
+    if (!res.ok) {
+      setError(data.error ?? 'Failed to submit vote.')
       setPicked(null)
+      return
     }
+
+    // Fetch results to get isCorrect on options (for quiz mode display)
+    if (pollData?.mode === 'quiz') {
+      const resultsRes = await fetch(`/api/sessions/${code}/results`)
+      if (resultsRes.ok) {
+        const results = await resultsRes.json()
+        setPollData((prev) =>
+          prev
+            ? {
+                ...prev,
+                options: results.options,
+              }
+            : prev
+        )
+      }
+    }
+
+    setVoteResult({
+      isCorrect: data.isCorrect ?? false,
+      pointsEarned: data.pointsEarned ?? 0,
+      myScore: data.myScore ?? 0,
+      myRank: data.myRank ?? 1,
+      totalParticipants: data.totalParticipants ?? 1,
+      tally: data.tally ?? {},
+      totalVotes: data.totalVotes ?? 1,
+    })
+
+    setStage('result')
+  } catch {
+    setError('Network error submitting vote.')
+    setPicked(null)
   }
+}
 
   const options = pollData?.options ?? []
   const totalVotes = voteResult?.totalVotes ?? 1
