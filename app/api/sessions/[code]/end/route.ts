@@ -4,7 +4,7 @@ import { connectDB } from '@/lib/mongodb'
 import Session from '@/models/Session'
 import Poll from '@/models/Poll'
 import Participant from '@/models/Participant'
-import { emitToRoom } from '@/lib/sse-emitter'
+import { emitToRoom } from '@/lib/socket'
 
 export async function POST(
   req: NextRequest,
@@ -46,10 +46,8 @@ export async function POST(
   })
 
   // Notify all clients
-  emitToRoom(code, {
-    type: 'session_ended',
-    data: { leaderboard, message: 'The session has ended' },
-  })
+  // Remove the incorrect 'session_started' emit - that's for starting, not ending
+  emitToRoom(code, 'session_ended', { leaderboard, message: 'The session has ended' })
 
   return NextResponse.json({ success: true, leaderboard })
-}
+}  // ← Closing brace for the function

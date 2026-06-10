@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Hexagon, Users, Play, Square, Trophy, BarChart3, Copy, Check, Loader2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import { io, Socket } from 'socket.io-client'
 
 interface Participant {
   rank: number
@@ -32,19 +33,22 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
   const [pollMode, setPollMode] = useState<"quiz" | "vote">("vote")
   const sseRef = useRef<EventSource | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const socketRef = useRef<Socket | null>(null)
 
   useEffect(() => {
     params.then(({ code: c }) => {
       setCode(c)
       loadSession(c)
-      connectSSE(c)
       startPollingResults(c)
+      connectSocket(c)
     })
+    
     return () => {
       sseRef.current?.close()
       if (pollRef.current) clearInterval(pollRef.current)
+      if (socketRef.current) socketRef.current.disconnect()
     }
-  }, [])
+  }, [params])
 
   async function loadSession(c: string) {
     try {
@@ -58,19 +62,18 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
     } catch {}
   }
 
-  function connectSSE(c: string) {
-    if (sseRef.current) sseRef.current.close()
-    const es = new EventSource(`/api/sessions/${c}/sse`)
-    sseRef.current = es
-    es.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data)
-        if (payload.type === "vote_update") {
-          if (payload.data.participantCount) setParticipantCount(payload.data.participantCount)
-        }
-        if (payload.type === "session_ended") setStatus("ended")
-      } catch {}
-    }
+  function connectSocket(c: string) {
+    if (socketRef.current) socketRef.current.disconnect()
+    const socket = io({ path: '/api/socketio' })
+    socketRef.current = socket
+
+    socket.on('connect', () => socket.emit('join_room', c))
+
+    socket.on('vote_update', (data) => {
+      if (data.participantCount) setParticipantCount(data.participantCount)
+    })
+
+    socket.on('session_ended', () => setStatus('ended'))
   }
 
   function startPollingResults(c: string) {
