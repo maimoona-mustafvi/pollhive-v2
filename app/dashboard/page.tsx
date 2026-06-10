@@ -2,7 +2,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { HostShell } from "@/components/host-shell"
 import { StatCards } from "@/components/stat-cards"
-import { PollCard } from "@/components/poll-card"
+import { DashboardPollGrid } from "@/components/dashboard-poll-grid"
 import { PlusCircle } from "lucide-react"
 import { getSession } from "@/lib/auth"
 import { connectDB } from "@/lib/mongodb"
@@ -42,10 +42,6 @@ export default async function DashboardPage() {
 
   const { polls, stats } = await getDashboardData(session.userId)
 
-  const livePolls = polls.filter((p) => p.status === "live")
-  const others = polls.filter((p) => p.status !== "live")
-
-  // Serialize for client components
   const serializedPolls = polls.map((p) => ({
     id: p._id.toString(),
     title: p.title,
@@ -89,51 +85,7 @@ export default async function DashboardPage() {
           totalVotes={stats.totalVotes}
           participantsToday={stats.participantsToday}
         />
-
-        {livePolls.length > 0 && (
-          <section>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-navy">Live now</h2>
-              <span className="text-sm text-muted-foreground">{livePolls.length} session{livePolls.length !== 1 ? "s" : ""}</span>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {serializedPolls
-                .filter((p) => p.status === "live")
-                .map((poll) => (
-                  <PollCard key={poll.id} poll={poll} />
-                ))}
-            </div>
-          </section>
-        )}
-
-        <section>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-navy">
-              {livePolls.length > 0 ? "Recent polls" : "Your polls"}
-            </h2>
-            <Link href="/my-polls" className="text-sm font-medium text-blue hover:underline">
-              View all
-            </Link>
-          </div>
-          {others.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {serializedPolls
-                .filter((p) => p.status !== "live")
-                .map((poll) => (
-                  <PollCard key={poll.id} poll={poll} />
-                ))}
-            </div>
-          ) : (
-            <div className="rounded-2xl bg-card p-12 text-center shadow-sm ring-1 ring-border/60">
-              <p className="text-sm text-muted-foreground">
-                No polls yet.{" "}
-                <Link href="/create" className="font-medium text-blue hover:underline">
-                  Create your first poll →
-                </Link>
-              </p>
-            </div>
-          )}
-        </section>
+        <DashboardPollGrid polls={serializedPolls} />
       </div>
     </HostShell>
   )

@@ -4,7 +4,8 @@ import { useState } from "react"
 import type { Poll } from "@/lib/polls"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
-import { Check, Copy, MoreHorizontal, Trophy, Users, Vote } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Check, Copy, MoreHorizontal, Trophy, Users, Vote, Rocket, Trash2, X } from "lucide-react"
 
 const STATUS_STYLES: Record<Poll["status"], { label: string; dot: string; text: string; bg: string }> = {
   live: { label: "Live", dot: "bg-lime", text: "text-navy", bg: "bg-lime" },
@@ -13,8 +14,12 @@ const STATUS_STYLES: Record<Poll["status"], { label: string; dot: string; text: 
   draft: { label: "Draft", dot: "bg-muted-foreground/60", text: "text-muted-foreground", bg: "bg-muted" },
 }
 
-export function PollCard({ poll }: { poll: Poll }) {
+export function PollCard({ poll, onDelete }: { poll: Poll; onDelete?: (id: string) => void }) {
   const [copied, setCopied] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [relaunching, setRelaunching] = useState(false)
+  const router = useRouter()
   const status = STATUS_STYLES[poll.status]
   const isQuiz = poll.mode === "quiz"
 
@@ -24,8 +29,39 @@ export function PollCard({ poll }: { poll: Poll }) {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  async function handleDelete() {
+    if (!confirm("Delete this poll? This cannot be undone.")) return
+    setDeleting(true)
+    setMenuOpen(false)
+    try {
+      const res = await fetch(`/api/polls/${poll.id}`, { method: "DELETE" })
+      if (res.ok) {
+        onDelete?.(poll.id)
+      }
+    } catch {}
+    setDeleting(false)
+  }
+
+  async function handleRelaunch() {
+    setRelaunching(true)
+    setMenuOpen(false)
+    try {
+      const res = await fetch("/api/sessions/launch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pollId: poll.id }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        router.push(`/host/${data.session.roomCode}`)
+        router.refresh()
+      }
+    } catch {}
+    setRelaunching(false)
+  }
+
   return (
-    <div className="group flex flex-col rounded-2xl bg-card p-5 shadow-sm ring-1 ring-border/60 transition-all hover:-translate-y-0.5 hover:shadow-md">
+    <div className="group relative flex flex-col rounded-2xl bg-card p-5 shadow-sm ring-1 ring-border/60 transition-all hover:-translate-y-0.5 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <span
           className={cn(
@@ -58,15 +94,19 @@ export function PollCard({ poll }: { poll: Poll }) {
       <div className="mt-4 flex items-center justify-between rounded-xl bg-canvas px-3 py-2.5">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Room code</p>
-          <p className="font-mono text-lg font-bold tracking-[0.2em] text-navy">{poll.roomCode}</p>
+          <p className="font-mono text-lg font-bold tracking-[0.2em] text-navy">
+            {poll.roomCode || "——"}
+          </p>
         </div>
-        <button
-          onClick={copyCode}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:brightness-105"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy"}
-        </button>
+        {poll.roomCode && (
+          <button
+            onClick={copyCode}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:brightness-105"
+          >
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            {copied ? "Copied" : "Copy"}
+          </button>
+        )}
       </div>
 
       <div className="mt-4 flex items-center justify-between border-t border-border/70 pt-4">
@@ -75,14 +115,46 @@ export function PollCard({ poll }: { poll: Poll }) {
           {poll.participants.toLocaleString()}
           <span className="text-muted-foreground">joined</span>
         </span>
-          {poll.status === "live" ? (
-              <Link href={`/host/${poll.roomCode}`} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-blue transition-colors hover:bg-canvas">
-                Manage →
-              </Link>
-            ) : (
-            <button className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-canvas hover:text-navy">
+
+        {poll.status === "live" ? (
+          <Link
+            href={`/host/${poll.roomCode}`}
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-blue transition-colors hover:bg-canvas"
+          >
+            Manage →
+          </Link>
+        ) : (
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              disabled={deleting || relaunching}
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-canvas hover:text-navy disabled:opacity-50"
+            >
               <MoreHorizontal className="size-4.5" />
             </button>
+
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-9 z-20 min-w-[160px] rounded-xl border border-border bg-card p-1 shadow-lg">
+                  <button
+                    onClick={handleRelaunch}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-canvas"
+                  >
+                    <Rocket className="size-4 text-blue" />
+                    {relaunching ? "Launching…" : "Relaunch"}
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    <Trash2 className="size-4" />
+                    {deleting ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>

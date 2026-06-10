@@ -35,25 +35,25 @@ export async function GET(
   }
 
   return NextResponse.json({
-    session: {
-      id: session._id.toString(),
-      roomCode: session.roomCode,
-      status: session.status,
-      currentQuestionIndex: session.currentQuestionIndex,
-    },
-    poll: {
-      id: poll._id.toString(),
-      title: poll.title,
-      mode: poll.mode,
-      question: poll.question,
-      options: poll.options.map((o) => ({
-        id: o.id,
-        text: o.text,
-        // Only expose isCorrect if quiz mode AND after voting
-      })),
-      timerSeconds: poll.timerSeconds,
-      anonymous: poll.anonymous,
-      showResults: poll.showResults,
-    },
-  })
+  session: {
+    id: session._id.toString(),
+    roomCode: session.roomCode,
+    status: session.status,
+    currentQuestionIndex: session.currentQuestionIndex,
+    participantCount: session.participantCount, // ← add this
+  },
+  poll: {
+    id: poll._id.toString(),
+    title: poll.title,
+    mode: poll.mode,
+    question: poll.question,
+    options: poll.options.map((o) => ({
+      id: o.id,
+      text: o.text,
+    })),
+    timerSeconds: poll.timerSeconds,
+    anonymous: poll.anonymous,
+    showResults: poll.showResults,
+  },
+})
 }
