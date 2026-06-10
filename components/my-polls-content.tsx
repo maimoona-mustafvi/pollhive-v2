@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { PollCard } from "@/components/poll-card"
 import { cn } from "@/lib/utils"
 
@@ -25,12 +26,32 @@ const FILTERS: { key: "all" | PollStatus; label: string }[] = [
   { key: "draft", label: "Drafts" },
 ]
 
-export function MyPollsContent({ polls }: { polls: Poll[] }) {
+export function MyPollsContent({ polls: initialPolls }: { polls: Poll[] }) {
+  const [polls, setPolls] = useState(initialPolls)
   const [filter, setFilter] = useState<"all" | PollStatus>("all")
-  const filtered = filter === "all" ? polls : polls.filter((p) => p.status === filter)
+  const searchParams = useSearchParams()
+  const query = searchParams.get("q")?.toLowerCase() ?? ""
+
+  function handleDelete(id: string) {
+    setPolls((prev) => prev.filter((p) => p.id !== id))
+  }
+
+  const byStatus = filter === "all" ? polls : polls.filter((p) => p.status === filter)
+  const filtered = query
+    ? byStatus.filter(
+        (p) =>
+          p.title.toLowerCase().includes(query) ||
+          p.roomCode.includes(query)
+      )
+    : byStatus
 
   return (
     <div className="space-y-6">
+      {query && (
+        <p className="text-sm text-muted-foreground">
+          Showing results for <span className="font-medium text-navy">"{query}"</span>
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => {
           const count =
@@ -63,12 +84,14 @@ export function MyPollsContent({ polls }: { polls: Poll[] }) {
       {filtered.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((poll) => (
-            <PollCard key={poll.id} poll={poll} />
+            <PollCard key={poll.id} poll={poll} onDelete={handleDelete} />
           ))}
         </div>
       ) : (
         <div className="rounded-2xl bg-card p-12 text-center shadow-sm ring-1 ring-border/60">
-          <p className="text-sm text-muted-foreground">No polls in this category yet.</p>
+          <p className="text-sm text-muted-foreground">
+            {query ? `No polls match "${query}".` : "No polls in this category yet."}
+          </p>
         </div>
       )}
     </div>
