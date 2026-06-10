@@ -3,19 +3,19 @@ import { getSession } from '@/lib/auth'
 import { connectDB } from '@/lib/mongodb'
 import Session from '@/models/Session'
 import Poll from '@/models/Poll'
-import { emitToRoom } from '@/lib/sse-emitter'
+import Participant from '@/models/Participant'
+import { emitToRoom } from '@/lib/socket'
 
-// POST /api/sessions/[code]/advance — start session or move to next question
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ code: string }> }
 ) {
+  const { code } = await context.params
   const authSession = await getSession()
   if (!authSession) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { code } = await context.params
   await connectDB()
 
   const session = await Session.findOne({
@@ -24,57 +24,29 @@ export async function POST(
   })
 
   if (!session) {
-    return NextResponse.json(
-      { error: 'Session not found or not authorized' },
-      { status: 404 }
-    )
+    return NextResponse.json({ error: 'Session not found' }, { status: 404 })
   }
 
+  // Update session status to live
+  await Session.findByIdAndUpdate(session._id, { status: 'live' })
+
+  // Get poll data to send to participants
   const poll = await Poll.findById(session.pollId)
+  
   if (!poll) {
     return NextResponse.json({ error: 'Poll not found' }, { status: 404 })
   }
 
-  const timerSeconds = poll.timerSeconds ?? 20
-  const now = new Date()
-  const timerEndsAt = new Date(now.getTime() + timerSeconds * 1000)
-
-  if (session.status === 'waiting') {
-    // Start the session
-    await Session.findByIdAndUpdate(session._id, {
-      status: 'live',
-      timerStartedAt: now,
-      timerEndsAt,
-    })
-
-    emitToRoom(code, {
-      type: 'session_started',
-      data: {
-        question: poll.question,
-        options: poll.options.map((o) => ({ id: o.id, text: o.text })),
-        mode: poll.mode,
-        timerSeconds,
-        timerEndsAt: timerEndsAt.toISOString(),
-      },
-    })
-
-    return NextResponse.json({ status: 'started', timerEndsAt })
-  }
-
-  // End the session if no more questions (single-question polls for now)
-  // Future: multi-question support would track currentQuestionIndex
-  await Session.findByIdAndUpdate(session._id, {
-    status: 'ended',
+  // Notify all clients that session started
+  emitToRoom(code, 'session_started', { 
+    question: poll.title,
+    options: poll.options,
+    mode: poll.mode
   })
 
-  await Poll.findByIdAndUpdate(poll._id, {
-    status: 'ended',
+  return NextResponse.json({ 
+    success: true, 
+    status: 'live',
+    message: 'Session started successfully'
   })
-
-  emitToRoom(code, {
-    type: 'session_ended',
-    data: { message: 'The session has ended' },
-  })
-
-  return NextResponse.json({ status: 'ended' })
 }

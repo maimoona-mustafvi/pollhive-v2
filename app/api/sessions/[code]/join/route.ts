@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
 import Session from '@/models/Session'
 import Participant from '@/models/Participant'
-import Poll from '@/models/Poll'          // ← THIS WAS MISSING
-import { emitToRoom } from '@/lib/sse-emitter'
+import Poll from '@/models/Poll'
+import { emitToRoom } from '@/lib/socket'  // ← CHANGED: from sse-emitter to socket
 import { z } from 'zod'
 
 const JoinSchema = z.object({
@@ -50,16 +50,32 @@ export async function POST(
 
     console.log(`[JOIN_SESSION] Found session: ${session._id}, status: ${session.status}`)
 
-    // Create participant
-    const participant = await Participant.create({
+    // Check if name already exists in this session
+    const existingParticipant = await Participant.findOne({
       sessionId: session._id,
       name: parsed.data.name,
     })
 
-    // Increment participant count
-    await Session.findByIdAndUpdate(session._id, {
-      $inc: { participantCount: 1 },
+    if (existingParticipant) {
+      return NextResponse.json(
+        { error: 'Name already taken in this session' },
+        { status: 409 }
+      )
+    }
+
+    // Create participant
+    const participant = await Participant.create({
+      sessionId: session._id,
+      name: parsed.data.name,
+      score: 0,
     })
+
+    // Increment participant count
+    const updatedSession = await Session.findByIdAndUpdate(
+      session._id,
+      { $inc: { participantCount: 1 } },
+      { new: true }
+    )
 
     // Update poll total participants
     await Poll.findByIdAndUpdate(session.pollId, {
@@ -69,13 +85,9 @@ export async function POST(
     console.log(`[JOIN_SESSION] Created participant: ${participant._id}`)
 
     // Notify everyone in the room that someone joined
-    emitToRoom(code, {
-      type: 'vote_update',
-      data: {
-        participantCount: session.participantCount + 1,
-        event: 'participant_joined',
-        participantName: parsed.data.name,
-      },
+    emitToRoom(code, 'participant_joined', {  // ← CHANGED: proper event format
+      participantCount: updatedSession?.participantCount || session.participantCount + 1,
+      participantName: parsed.data.name,
     })
 
     return NextResponse.json({
@@ -84,7 +96,6 @@ export async function POST(
         name: participant.name,
         sessionId: session._id.toString(),
       },
-      // Return session status so client knows if already live
       sessionStatus: session.status,
     })
   } catch (err) {

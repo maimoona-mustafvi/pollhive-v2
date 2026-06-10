@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 import { Hexagon, ArrowRight, Loader2, Check, Trophy, Timer, X } from "lucide-react"
+import { io, Socket } from 'socket.io-client'
 
 type Stage = "join" | "lobby" | "question" | "result" | "ended"
 
@@ -57,9 +58,8 @@ export function AudienceView() {
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [timerEndsAt, setTimerEndsAt] = useState<Date | null>(null)
 
-  const sseRef = useRef<EventSource | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  // Use a ref to track stage inside SSE callbacks to avoid stale closures
+  const socketRef = useRef<Socket | null>(null)
   const stageRef = useRef<Stage>("join")
 
   useEffect(() => {
@@ -68,8 +68,8 @@ export function AudienceView() {
 
   useEffect(() => {
     return () => {
-      sseRef.current?.close()
       if (timerRef.current) clearInterval(timerRef.current)
+      if (socketRef.current) socketRef.current.disconnect()
     }
   }, [])
 
@@ -90,71 +90,46 @@ export function AudienceView() {
     }
   }, [timerEndsAt])
 
-  function connectSSE(roomCode: string) {
-    if (sseRef.current) sseRef.current.close()
+  function connectSocket(roomCode: string) {
+    if (socketRef.current) socketRef.current.disconnect()
 
-    const es = new EventSource(`/api/sessions/${roomCode}/sse`)
-    sseRef.current = es
+    const socket = io({ path: '/api/socketio' })
+    socketRef.current = socket
 
-    es.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data)
-        handleSSEEvent(payload)
-      } catch {
-        // ignore parse errors
+    socket.on('connect', () => {
+      socket.emit('join_room', roomCode)
+    })
+
+    socket.on('session_started', (data) => {
+      setPollData(prev => prev ? { ...prev, question: data.question, options: data.options } : prev)
+      if (data.timerEndsAt) {
+        setTimerEndsAt(new Date(data.timerEndsAt))
+        setTimeLeft(data.timerSeconds)
       }
-    }
+      setPicked(null)
+      setVoteResult(null)
+      setStage('question')
+    })
 
-    es.onerror = () => {
-      // Use stageRef to avoid stale closure
+    socket.on('session_ended', (data) => {
+      setStage('ended')
+      if (data?.leaderboard && pollData?.mode === 'quiz') {
+        // You can handle final leaderboard here if needed
+      }
+      socket.disconnect()
+    })
+
+    socket.on('vote_update', (data) => {
+      if (data.tally) {
+        setVoteResult(prev => prev ? { ...prev, tally: data.tally, totalVotes: data.totalVotes } : prev)
+      }
+    })
+
+    socket.on('disconnect', () => {
       setTimeout(() => {
-        if (stageRef.current !== "ended") connectSSE(roomCode)
+        if (stageRef.current !== 'ended') connectSocket(roomCode)
       }, 3000)
-    }
-  }
-
-  function handleSSEEvent(payload: { type: string; data: Record<string, unknown> }) {
-    switch (payload.type) {
-      case "session_started": {
-        const d = payload.data as {
-          question: string
-          options: PollOption[]
-          mode: string
-          timerSeconds: number
-          timerEndsAt: string
-        }
-        setPollData((prev) =>
-          prev
-            ? { ...prev, question: d.question, options: d.options }
-            : prev
-        )
-        if (d.timerEndsAt) {
-          setTimerEndsAt(new Date(d.timerEndsAt))
-          setTimeLeft(d.timerSeconds)
-        }
-        setPicked(null)
-        setVoteResult(null)
-        setStage("question")
-        break
-      }
-      case "session_ended":
-        setStage("ended")
-        sseRef.current?.close()
-        break
-      case "vote_update":
-        if (voteResult && payload.data.tally) {
-          setVoteResult((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  tally: payload.data.tally as Record<string, number>,
-                  totalVotes: payload.data.totalVotes as number,
-                }
-              : prev
-          )
-        }
-        break
-    }
+    })
   }
 
   async function handleJoin() {
@@ -190,12 +165,10 @@ export function AudienceView() {
       setPollData(poll)
       setParticipantId(joinData.participant.id)
 
-      // 3. Connect SSE for live updates
-      connectSSE(code)
+      // 3. Connect Socket.IO for live updates
+      connectSocket(code)
 
       // 4. If the session is already live, jump straight to the question stage
-      //    instead of waiting in the lobby for a session_started event that
-      //    will never come (it already fired before we joined).
       const alreadyLive =
         joinData.sessionStatus === "live" || session.status === "live"
 
@@ -206,7 +179,6 @@ export function AudienceView() {
           const results = await resultsRes.json()
           if (results.timerEndsAt) {
             const endsAt = new Date(results.timerEndsAt)
-            // Only start timer if there's still time left
             if (endsAt.getTime() > Date.now()) {
               setTimerEndsAt(endsAt)
               setTimeLeft(Math.ceil((endsAt.getTime() - Date.now()) / 1000))
@@ -532,7 +504,9 @@ export function AudienceView() {
                 setSessionData(null)
                 setPollData(null)
                 setError(null)
-                sseRef.current?.close()
+                setTimerEndsAt(null)
+                setTimeLeft(null)
+                socketRef.current?.disconnect()
               }}
               className="mt-8 rounded-2xl bg-white/10 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/20"
             >
