@@ -3,7 +3,6 @@ import { getSession } from '@/lib/auth'
 import { connectDB } from '@/lib/mongodb'
 import Session from '@/models/Session'
 import Poll from '@/models/Poll'
-import Participant from '@/models/Participant'
 import { emitToRoom } from '@/lib/socket'
 
 export async function POST(
@@ -27,26 +26,34 @@ export async function POST(
     return NextResponse.json({ error: 'Session not found' }, { status: 404 })
   }
 
-  // Update session status to live
-  await Session.findByIdAndUpdate(session._id, { status: 'live' })
-
-  // Get poll data to send to participants
   const poll = await Poll.findById(session.pollId)
-  
   if (!poll) {
     return NextResponse.json({ error: 'Poll not found' }, { status: 404 })
   }
 
-  // Notify all clients that session started
-  emitToRoom(code, 'session_started', { 
-    question: poll.title,
-    options: poll.options,
-    mode: poll.mode
+  // Set timer timestamps when going live
+  const now = new Date()
+  const timerSeconds = poll.timerSeconds ?? 20
+  const timerEndsAt = new Date(now.getTime() + timerSeconds * 1000)
+
+  await Session.findByIdAndUpdate(session._id, {
+    status: 'live',
+    timerStartedAt: now,
+    timerEndsAt,
   })
 
-  return NextResponse.json({ 
-    success: true, 
+  // Notify all clients that session started
+  emitToRoom(code, 'session_started', {
+    question: poll.question,
+    options: poll.options.map((o) => ({ id: o.id, text: o.text })),
+    mode: poll.mode,
+    timerSeconds,
+    timerEndsAt: timerEndsAt.toISOString(),
+  })
+
+  return NextResponse.json({
+    success: true,
     status: 'live',
-    message: 'Session started successfully'
+    message: 'Session started successfully',
   })
 }

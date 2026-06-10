@@ -48,12 +48,12 @@ export async function GET(
   }
 
   return NextResponse.json({
-    tally,
-    totalVotes: votes.length,
-    participantCount: session.participantCount,
-    leaderboard,
-    options: poll.options,
-    sessionStatus: session.status,
-    timerEndsAt: session.timerEndsAt,
-  })
+  tally,
+  totalVotes: votes.length,
+  participantCount: session.participantCount,
+  leaderboard,
+  options: poll.options,  
+  sessionStatus: session.status,
+  timerEndsAt: session.timerEndsAt,
+})
 }
