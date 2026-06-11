@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? 'pollhive-dev-secret-change-in-production-32chars'
+  process.env.JWT_SECRET ?? 'pollhive-dev'
 )
 
 export interface JWTPayload {

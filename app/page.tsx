@@ -16,7 +16,7 @@ export default function HomePage() {
         </div>
         <Link
           href="/login"
-          className="rounded-full px-4 py-2 text-sm font-medium text-navy transition-colors hover:bg-white"
+          className="rounded-full px-4 py-2 text-sm font-medium text-navy transition-colors bg-lime"
         >
           Sign in
         </Link>
@@ -32,7 +32,7 @@ export default function HomePage() {
           Run live quizzes and votes your audience can join in seconds
         </h1>
         <p className="mt-4 max-w-xl text-pretty text-center text-base leading-relaxed text-muted-foreground">
-          Host an interactive session or jump into one with a room code. No downloads, no friction — just instant
+          Host an interactive session or jump into one with a room code. No downloads, no friction just instant
           participation.
         </p>
 
@@ -59,16 +59,16 @@ export default function HomePage() {
           {/* Join Poll */}
           <Link
             href="/join"
-            className="group relative flex flex-col rounded-3xl border border-border bg-white p-7 shadow-sm transition-transform hover:-translate-y-1"
+            className="group relative flex flex-col rounded-3xl border border-border bg-navy p-7 shadow-sm transition-transform hover:-translate-y-1"
           >
             <div className="flex size-12 items-center justify-center rounded-2xl bg-lime">
               <LogIn className="size-6 text-navy" />
             </div>
-            <h2 className="mt-5 text-xl font-semibold text-navy">Join a poll</h2>
-            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-              Already have a room code? Enter it to join a live session — no account needed.
+            <h2 className="mt-5 text-xl font-semibold text-white">Join a poll</h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-white/70">
+              Already have a room code? Enter it to join a live session no account needed.
             </p>
-            <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-blue">
+            <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-lime">
               Enter room code
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
             </span>

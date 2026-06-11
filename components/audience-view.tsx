@@ -485,8 +485,27 @@ export function AudienceView() {
 
             <div className="mt-4 rounded-2xl bg-white/10 p-4 text-center text-white/60 text-sm">
               <Loader2 className="mx-auto size-5 animate-spin mb-2 opacity-50" />
-              Waiting for the host to continue…
+                Waiting for the host to continue…
             </div>
+            <button
+              onClick={() => {
+                setStage("join")
+                setCode("")
+                setName("")
+                setPicked(null)
+                setVoteResult(null)
+                setParticipantId(null)
+                setSessionData(null)
+                setPollData(null)
+                setError(null)
+                setTimerEndsAt(null)
+                setTimeLeft(null)
+                socketRef.current?.disconnect()
+              }}
+              className="mt-3 w-full rounded-2xl bg-white/10 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/20"
+            >
+              Leave session
+            </button>
           </div>
         )}
 

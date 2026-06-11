@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Hexagon, Users, Play, Square, Trophy, BarChart3, Copy, Check, Loader2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
@@ -31,62 +31,96 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
   const [loading, setLoading] = useState(false)
   const [pollTitle, setPollTitle] = useState("")
   const [pollMode, setPollMode] = useState<"quiz" | "vote">("vote")
-  const sseRef = useRef<EventSource | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const socketRef = useRef<Socket | null>(null)
 
+  const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null)
+  const socketRef  = useRef<Socket | null>(null)
+  const statusRef  = useRef<"waiting" | "live" | "ended">("waiting")
+
+  // Keep ref in sync so closures always see latest status
+  useEffect(() => { statusRef.current = status }, [status])
+
+  // ── fetch results (called on demand and on interval when live) ──
+  const fetchResults = useCallback(async (c: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${c}/results`)
+      if (!res.ok) return
+      const data: ResultsData = await res.json()
+      setResults(data)
+      setParticipantCount(data.participantCount ?? 0)
+      if (data.sessionStatus && data.sessionStatus !== statusRef.current) {
+        setStatus(data.sessionStatus as "waiting" | "live" | "ended")
+      }
+    } catch { /* swallow */ }
+  }, [])
+
+  // ── start / stop polling based on status ──
+  const startPolling = useCallback((c: string) => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    // Only poll when live — no need to hammer the DB while waiting
+    pollRef.current = setInterval(() => fetchResults(c), 2500)
+  }, [fetchResults])
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }, [])
+
+  // ── Socket.IO ──
+  const connectSocket = useCallback((c: string) => {
+    if (socketRef.current) socketRef.current.disconnect()
+
+    const socket = io({ path: '/api/socketio', reconnectionDelayMax: 5000 })
+    socketRef.current = socket
+
+    socket.on('connect', () => socket.emit('join_room', c))
+
+    socket.on('participant_joined', (data: { participantCount: number }) => {
+      // Use socket event directly — no need to wait for next poll cycle
+      setParticipantCount(data.participantCount)
+    })
+
+    socket.on('vote_update', () => {
+      // Trigger an immediate results fetch so chart updates right away
+      fetchResults(c)
+    })
+
+    socket.on('session_ended', () => {
+      setStatus('ended')
+      stopPolling()
+    })
+  }, [fetchResults, stopPolling])
+
+  // ── bootstrap ──
   useEffect(() => {
     params.then(({ code: c }) => {
       setCode(c)
       loadSession(c)
-      startPollingResults(c)
       connectSocket(c)
     })
-    
     return () => {
-      sseRef.current?.close()
-      if (pollRef.current) clearInterval(pollRef.current)
-      if (socketRef.current) socketRef.current.disconnect()
+      stopPolling()
+      socketRef.current?.disconnect()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params])
+
+  // ── start polling only when live ──
+  useEffect(() => {
+    if (status === 'live' && code) startPolling(code)
+    if (status !== 'live') stopPolling()
+  }, [status, code, startPolling, stopPolling])
 
   async function loadSession(c: string) {
     try {
       const res = await fetch(`/api/sessions/${c}`)
       if (!res.ok) return
       const data = await res.json()
-      setStatus(data.session.status)
+      const s = data.session.status as "waiting" | "live" | "ended"
+      setStatus(s)
       setParticipantCount(data.session.participantCount ?? 0)
       setPollTitle(data.poll?.title ?? "")
       setPollMode(data.poll?.mode ?? "vote")
-    } catch {}
-  }
-
-  function connectSocket(c: string) {
-    if (socketRef.current) socketRef.current.disconnect()
-    const socket = io({ path: '/api/socketio' })
-    socketRef.current = socket
-
-    socket.on('connect', () => socket.emit('join_room', c))
-
-    socket.on('vote_update', (data) => {
-      if (data.participantCount) setParticipantCount(data.participantCount)
-    })
-
-    socket.on('session_ended', () => setStatus('ended'))
-  }
-
-  function startPollingResults(c: string) {
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/sessions/${c}/results`)
-        if (!res.ok) return
-        const data = await res.json()
-        setResults(data)
-        setParticipantCount(data.participantCount ?? 0)
-        setStatus(data.sessionStatus ?? "waiting")
-      } catch {}
-    }, 2000)
+      if (s === 'live') fetchResults(c) // load current results immediately
+    } catch { /* swallow */ }
   }
 
   async function handleStart() {
@@ -95,7 +129,7 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
       const res = await fetch(`/api/sessions/${code}/advance`, { method: "POST" })
       const data = await res.json()
       if (res.ok) setStatus(data.status === "ended" ? "ended" : "live")
-    } catch {}
+    } catch { /* swallow */ }
     finally { setLoading(false) }
   }
 
@@ -103,8 +137,11 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
     setLoading(true)
     try {
       const res = await fetch(`/api/sessions/${code}/end`, { method: "POST" })
-      if (res.ok) setStatus("ended")
-    } catch {}
+      if (res.ok) {
+        setStatus("ended")
+        fetchResults(code) // grab final leaderboard
+      }
+    } catch { /* swallow */ }
     finally { setLoading(false) }
   }
 
@@ -130,16 +167,14 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
             <span className="text-white font-semibold">PollHive</span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-            status === "live" ? "bg-lime text-navy" :
-            status === "ended" ? "bg-white/20 text-white" :
-            "bg-white/10 text-white/70"
-          }`}>
-            <span className={`size-1.5 rounded-full ${status === "live" ? "animate-pulse bg-navy" : "bg-current"}`} />
-            {status === "waiting" ? "Waiting" : status === "live" ? "Live" : "Ended"}
-          </span>
-        </div>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+          status === "live"  ? "bg-lime text-navy" :
+          status === "ended" ? "bg-white/20 text-white" :
+                               "bg-white/10 text-white/70"
+        }`}>
+          <span className={`size-1.5 rounded-full ${status === "live" ? "animate-pulse bg-navy" : "bg-current"}`} />
+          {status === "waiting" ? "Waiting" : status === "live" ? "Live" : "Ended"}
+        </span>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
@@ -248,7 +283,7 @@ export default function HostSessionPage({ params }: { params: Promise<{ code: st
                       p.rank === 1 ? "bg-lime text-navy" :
                       p.rank === 2 ? "bg-blue/20 text-blue" :
                       p.rank === 3 ? "bg-navy/10 text-navy" :
-                      "bg-white text-muted-foreground"
+                                     "bg-white text-muted-foreground"
                     }`}>
                       {p.rank}
                     </span>
