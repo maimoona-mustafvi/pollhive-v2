@@ -1,107 +1,93 @@
-import { HostShell } from "@/components/host-shell"
-import { Building2, Palette, Users, ChevronRight } from "lucide-react"
+import { LearnerSidebar } from '@/components/learner-sidebar';
+import { Bell, Lock, Eye, LogOut } from 'lucide-react';
 
 export default function SettingsPage() {
   return (
-    <HostShell active="settings" title="Settings" subtitle="Manage your workspace and branding.">
-      <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-        <div className="space-y-6">
-          <section className="rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/60">
-            <div className="flex items-center gap-2.5">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-canvas text-navy">
-                <Building2 className="size-5" />
-              </span>
-              <h2 className="text-base font-semibold text-navy">Organization</h2>
-            </div>
-            <div className="mt-5 grid gap-5 sm:grid-cols-2">
-              <Field label="Workspace name" value="Acme Inc" />
-              <Field label="Subdomain" value="acme.pollhive.app" />
-              <Field label="Default room size" value="500 participants" />
-              <Field label="Time zone" value="GMT+5 (Karachi)" />
-            </div>
-          </section>
+    <div className="flex">
+      <LearnerSidebar />
+      <div className="flex-1 ml-64 min-h-screen bg-canvas p-8">
+        <div className="max-w-3xl mx-auto">
+          <h1 className="text-4xl font-bold text-navy mb-2">Settings</h1>
+          <p className="text-muted-foreground mb-8">Manage your account and preferences</p>
 
-          <section className="rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/60">
-            <div className="flex items-center gap-2.5">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-canvas text-navy">
-                <Palette className="size-5" />
-              </span>
-              <h2 className="text-base font-semibold text-navy">Branding</h2>
+          {/* Account Settings */}
+          <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
+            <h2 className="text-lg font-bold text-navy mb-6">Account</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-navy mb-2">Email</label>
+                <input
+                  type="email"
+                  value="maya@example.com"
+                  disabled
+                  className="w-full px-4 py-2 bg-muted border border-border rounded-lg text-navy"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-navy mb-2">Full Name</label>
+                <input
+                  type="text"
+                  defaultValue="Maya Patel"
+                  className="w-full px-4 py-2 border border-border rounded-lg text-navy"
+                />
+              </div>
+              <button className="bg-blue text-white px-4 py-2 rounded-lg font-medium hover:bg-primary/90">
+                Save Changes
+              </button>
             </div>
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <Swatch color="#11358B" name="Navy" />
-              <Swatch color="#6192FC" name="Blue" />
-              <Swatch color="#C7EF66" name="Lime" />
-              <Swatch color="#EFF0F4" name="Canvas" border />
-            </div>
-            <button className="mt-5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:brightness-105">
-              Save branding
-            </button>
-          </section>
-        </div>
+          </div>
 
-        <aside className="space-y-6">
-          <section className="rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border/60">
-            <div className="flex items-center gap-2.5">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-canvas text-navy">
-                <Users className="size-5" />
-              </span>
-              <h2 className="text-base font-semibold text-navy">Team</h2>
-            </div>
-            <div className="mt-4 space-y-3">
-              {[
-                { n: "Maya Ahsan", r: "Owner", i: "MA" },
-                { n: "Daniel Lee", r: "Editor", i: "DL" },
-                { n: "Priya Rao", r: "Viewer", i: "PR" },
-              ].map((m) => (
-                <button key={m.n} className="flex w-full items-center justify-between rounded-xl px-2 py-2 transition-colors hover:bg-canvas">
-                  <div className="flex items-center gap-3">
-                    <span className="flex size-9 items-center justify-center rounded-full bg-navy text-xs font-semibold text-white">
-                      {m.i}
-                    </span>
-                    <div className="text-left">
-                      <p className="text-sm font-medium text-foreground">{m.n}</p>
-                      <p className="text-xs text-muted-foreground">{m.r}</p>
-                    </div>
+          {/* Preferences */}
+          <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
+            <h2 className="text-lg font-bold text-navy mb-6">Preferences</h2>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Bell size={20} className="text-blue" />
+                  <div>
+                    <p className="font-medium text-navy">Email Notifications</p>
+                    <p className="text-sm text-muted-foreground">Get notified about weak topics</p>
                   </div>
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                </button>
-              ))}
+                </div>
+                <input type="checkbox" defaultChecked className="w-5 h-5" />
+              </div>
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Eye size={20} className="text-blue" />
+                  <div>
+                    <p className="font-medium text-navy">Public Profile</p>
+                    <p className="text-sm text-muted-foreground">Show your progress on leaderboard</p>
+                  </div>
+                </div>
+                <input type="checkbox" className="w-5 h-5" />
+              </div>
             </div>
-            <button className="mt-4 w-full rounded-xl border-2 border-navy px-4 py-2.5 text-sm font-semibold text-navy transition-colors hover:bg-navy hover:text-white">
-              Invite member
+          </div>
+
+          {/* Security */}
+          <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
+            <h2 className="text-lg font-bold text-navy mb-6">Security</h2>
+            <div className="space-y-4">
+              <button className="w-full flex items-center gap-3 p-4 hover:bg-muted/30 rounded-lg text-left">
+                <Lock size={20} className="text-blue" />
+                <div>
+                  <p className="font-medium text-navy">Change Password</p>
+                  <p className="text-sm text-muted-foreground">Update your password regularly</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Danger Zone */}
+          <div className="bg-destructive/10 rounded-lg p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-navy mb-6">Danger Zone</h2>
+            <button className="flex items-center gap-2 text-destructive font-medium hover:opacity-80">
+              <LogOut size={20} />
+              <span>Log Out</span>
             </button>
-          </section>
-        </aside>
+          </div>
+        </div>
       </div>
-    </HostShell>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</label>
-      <input
-        defaultValue={value}
-        className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm outline-none ring-ring/40 focus:border-ring focus:ring-2"
-      />
     </div>
-  )
-}
-
-function Swatch({ color, name, border }: { color: string; name: string; border?: boolean }) {
-  return (
-    <div className="flex flex-col items-center gap-1.5">
-      <span
-        className={cnBorder(border)}
-        style={{ backgroundColor: color }}
-      />
-      <span className="text-xs text-muted-foreground">{name}</span>
-    </div>
-  )
-}
-
-function cnBorder(border?: boolean) {
-  return `size-12 rounded-xl shadow-sm ${border ? "ring-1 ring-border" : ""}`
+  );
 }

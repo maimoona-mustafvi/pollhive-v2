@@ -7,9 +7,9 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'PollHive — Live Polling for Teams',
+  title: 'Auxilio AI — Practice Interviews with AI',
   description:
-    'PollHive is a multi-tenant real-time polling platform. Host live quizzes and votes, and let audiences join instantly with a room code.',
+    'Auxilio AI is an AI-powered interview practice platform. Upload your study material or use curated question banks to simulate real interviews with adaptive follow-up questions.',
   generator: 'v0.app',
   icons: {
     icon: [
